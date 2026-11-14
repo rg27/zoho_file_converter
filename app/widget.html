@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Converter and Compressor</title>
+  <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
+  <link rel="stylesheet" href="./css/index.css">
+</head>
+<body>
+  <form id="main-form" class="card" novalidate>
+    <div class="card-accent-bar"></div>
+    <div class="card-head">
+      <h1 class="card-title">File Converter and Compressor</h1>
+      <p id="user-greeting" class="greeting">Hello!</p>
+    </div>
+
+    <div class="section-title"><span class="dot"></span><h2>Files</h2><span class="line"></span></div>
+    <div class="grid">
+      <div class="field full">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Choose files">
+          <input type="file" id="file-input" multiple hidden>
+          <div class="dz-icon"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"/></svg></div>
+          <p class="dz-title">Drag and drop files here, or <span class="dz-link">browse</span></p>
+          <p id="dz-hint" class="dz-hint"></p>
+        </div>
+        <span id="files-error" class="error-msg hidden" role="alert"></span>
+        <div id="file-summary" class="file-summary hidden">
+          <span id="file-count"></span>
+          <button type="button" id="clear-all" class="link-btn">Remove all</button>
+        </div>
+        <ul id="file-list" class="file-list"></ul>
+      </div>
+    </div>
+
+    <div class="section-title"><span class="dot"></span><h2>Settings</h2><span class="line"></span></div>
+    <div class="grid two">
+      <div class="field">
+        <span class="field-label">Output format</span>
+        <div class="seg" id="fmt-seg">
+          <button type="button" data-v="keep" class="on">Keep original</button>
+          <button type="button" data-v="jpg">JPG</button>
+          <button type="button" data-v="png">PNG</button>
+          <button type="button" data-v="pdf">PDF</button>
+        </div>
+        <p class="hint">Images can become JPG, PNG or PDF. PDFs are compressed by Zoho PDF Editor, or become one JPG/PNG per page saved in WorkDrive (size settings do not apply to that).</p>
+      </div>
+      <div class="field">
+        <span class="field-label">File size</span>
+        <div class="seg" id="mode-seg">
+          <button type="button" data-v="preset" class="on">Preset</button>
+          <button type="button" data-v="target">Target size</button>
+          <button type="button" data-v="scale">Scale %</button>
+        </div>
+        <div id="p-preset" class="panel seg">
+          <button type="button" data-l="low">Low</button>
+          <button type="button" data-l="recommended" class="on">Recommended</button>
+          <button type="button" data-l="extreme">Extreme</button>
+        </div>
+        <div id="p-target" class="panel hidden">
+          <input type="number" id="t-val" class="input" value="200" min="1">
+          <select id="t-unit" class="input"><option>KB</option><option>MB</option></select>
+        </div>
+        <div id="p-scale" class="panel hidden">
+          <input type="range" id="s-val" min="10" max="200" value="70">
+          <strong id="s-label">70%</strong>
+        </div>
+        <p class="hint" id="mode-hint"></p>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="btn btn-secondary" id="download-btn" hidden>Download results</button>
+      <button type="submit" class="btn btn-primary" id="run-btn">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        <span id="run-label">Process files</span>
+      </button>
+    </div>
+  </form>
+  <script src="./js/app.js"></script>
+</body>
+</html>
