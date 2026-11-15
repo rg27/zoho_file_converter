@@ -15,6 +15,12 @@
       <p id="user-greeting" class="greeting">Hello!</p>
     </div>
 
+    <div class="seg" id="tool-seg">
+      <button type="button" data-t="convert" class="on">Convert &amp; Compress</button>
+      <button type="button" data-t="merge">Merge PDFs</button>
+      <button type="button" data-t="pages">Delete / Extract pages</button>
+    </div>
+
     <div class="section-title"><span class="dot"></span><h2>Files</h2><span class="line"></span></div>
     <div class="grid">
       <div class="field full">
@@ -33,6 +39,7 @@
       </div>
     </div>
 
+    <div id="tab-convert" class="tab">
     <div class="section-title"><span class="dot"></span><h2>Settings</h2><span class="line"></span></div>
     <div class="grid two">
       <div class="field">
@@ -44,6 +51,7 @@
           <button type="button" data-v="pdf">PDF</button>
         </div>
         <p class="hint">Images can become JPG, PNG or PDF. PDFs are compressed by Zoho PDF Editor, or become one JPG/PNG per page saved in WorkDrive (size settings do not apply to that).</p>
+        <input type="text" id="pg-range" class="input" placeholder="PDF to image only: pages, e.g. 1-5 (blank = all)">
       </div>
       <div class="field">
         <span class="field-label">File size</span>
@@ -66,6 +74,37 @@
           <strong id="s-label">70%</strong>
         </div>
         <p class="hint" id="mode-hint"></p>
+      </div>
+    </div>
+    </div>
+
+    <div id="tab-merge" class="tab hidden">
+      <div class="section-title"><span class="dot"></span><h2>Merge settings</h2><span class="line"></span></div>
+      <div class="grid">
+        <div class="field">
+          <span class="field-label">Merged file name</span>
+          <input type="text" id="m-name" class="input" value="merged">
+          <p class="hint">Files are merged in the order shown. Use the arrows to reorder them before merging.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-pages" class="tab hidden">
+      <div class="section-title"><span class="dot"></span><h2>Page settings</h2><span class="line"></span></div>
+      <div class="grid two">
+        <div class="field">
+          <span class="field-label">Action</span>
+          <div class="seg" id="pg-seg">
+            <button type="button" data-a="delete" class="on">Delete pages</button>
+            <button type="button" data-a="extract">Extract pages</button>
+          </div>
+          <p class="hint">Delete removes the pages. Extract keeps only those pages in a new PDF.</p>
+        </div>
+        <div class="field">
+          <span class="field-label">Pages</span>
+          <input type="text" id="pg-val" class="input" placeholder="1,3-5">
+          <p class="hint">Single pages and ranges, for example 1,3-5. Applied to every PDF in the list.</p>
+        </div>
       </div>
     </div>
 

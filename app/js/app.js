@@ -13,12 +13,15 @@ const MAX_FILE_MB = 40, MAX_FILES = 50;
 const IMG_EXT = ["jpg", "jpeg", "png", "webp"];
 const ALLOWED_EXT = [...IMG_EXT, "pdf"];
 const PDF_FUNCTION = "compress_pdf_widget";
-const IMAGE_FUNCTION = "pdf_to_image_widget";   // PDF pages to JPG/PNG, saved in WorkDrive
+const IMAGE_FUNCTION = "pdf_to_image_widget";
+const MERGE_FUNCTION = "pdf_merge_widget";
+const PAGES_FUNCTION = "pdf_pages_widget";   // PDF pages to JPG/PNG, saved in WorkDrive
 const LEVELS = ["low", "recommended", "extreme"];
 const PRESETS = { low: { q: .85, s: 1 }, recommended: { q: .7, s: .85 }, extreme: { q: .45, s: .6 } };
 const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
-let files = [], nextId = 1, busy = false, greeted = false;
+let files = [], outputs = [], nextId = 1, busy = false, greeted = false;
+let tool = "convert", pgAction = "delete";
 const st = { fmt: "keep", mode: "preset", level: "recommended" };
 const $ = (id) => document.getElementById(id);
 
@@ -170,20 +173,47 @@ async function callPdfFunction(fileId, name, level) {
   return out;
 }
 
-/* PDF to JPG/PNG: Zoho PDF Editor creates one image per page and saves them in WorkDrive */
+/* Calls a Deluge function and returns its parsed JSON output */
+async function callFn(name, payload) {
+  const res = await ZOHO.CRM.FUNCTIONS.execute(name, { arguments: JSON.stringify({ arguments: JSON.stringify(payload) }) });
+  console.log(name, "result:", JSON.stringify(res, null, 2));
+  if (res?.code && res.code !== "success") throw new Error(`CRM returned ${res.code}: ${res.message || "no message"}`);
+  let out = res?.details?.output;
+  if (typeof out === "string") out = safeParse(out);
+  if (!out || out.status !== "success") throw new Error(out?.message || "The function returned no result.");
+  return out;
+}
+
+/* Reads a file the Deluge function stored in CRM file storage, back into the browser */
+async function fetchCrmFile(id) {
+  const r = await ZOHO.CRM.API.getFile({ id });
+  console.log("getFile result for", id, r);
+  if (r instanceof Blob) return r;
+  if (r instanceof ArrayBuffer) return new Blob([r]);
+  if (r && typeof r.blob === "function") return await r.blob();
+  if (r && r.data instanceof Blob) return r.data;
+  throw new Error("The file could not be read back from CRM.");
+}
+
+/* PDF to JPG/PNG: Zoho PDF Editor makes one image per page, and the widget brings them back for download */
 async function pdfToImages(item) {
   item.stage = "Uploading PDF..."; render();
   const fileId = await uploadToStorage(item.file);
   item.stage = `Converting pages to ${st.fmt.toUpperCase()}...`; render();
-  const payload = { file_id: fileId, file_name: item.file.name, format: st.fmt === "jpg" ? "jpeg" : "png", pages: "1-" };
-  const res = await ZOHO.CRM.FUNCTIONS.execute(IMAGE_FUNCTION, { arguments: JSON.stringify({ arguments: JSON.stringify(payload) }) });
-  console.log("PDF to image result:", JSON.stringify(res, null, 2));
-  if (res?.code && res.code !== "success") throw new Error(`CRM returned ${res.code}: ${res.message || "no message"}`);
-  let out = res?.details?.output;
-  if (typeof out === "string") out = safeParse(out);
-  if (!out || out.status !== "success" || !Array.isArray(out.files)) throw new Error(out?.message || "The conversion returned no result.");
-  item.links = out.files;
-  item.newSize = undefined;
+  const out = await callFn(IMAGE_FUNCTION, { file_id: fileId, file_name: item.file.name, format: st.fmt === "jpg" ? "jpeg" : "png", pages: $("pg-range").value.trim() || "1-" });
+  const got = [];
+  try {
+    for (const f of out.files) {
+      item.stage = `Downloading page ${got.length + 1} of ${out.files.length}...`; render();
+      got.push({ blob: await fetchCrmFile(f.file_id), name: f.name });
+    }
+    outputs.push(...got);
+    item.pages = got.length;
+    item.newSize = got.reduce((n, g) => n + g.blob.size, 0);
+  } catch (e) {
+    console.warn("Direct download failed, showing links instead:", e);
+    item.links = out.files;
+  }
 }
 
 async function processPdf(item) {
@@ -195,16 +225,25 @@ async function processPdf(item) {
   if (st.mode === "scale") { const s = +$("s-val").value; levels = [s >= 90 ? "low" : s >= 60 ? "recommended" : "extreme"]; }
 
   const T = st.mode === "target" ? targetBytes() : 0;
-  let out = null;
+  let out = null, blob = null;
   for (const lvl of levels) {
     item.stage = `Compressing (${lvl})...`; render();
     out = await callPdfFunction(fileId, item.file.name, lvl);
-    if (!T || out.new_size <= T) break;
+    item.stage = "Downloading result..."; render();
+    try { blob = await fetchCrmFile(out.file_id); }
+    catch (e) { console.warn("Direct download failed, using the link:", e); blob = null; break; }
+    if (!T || blob.size <= T) break;
   }
-  if (T && out.new_size > T) item.note = "Closest possible size";
-  if (out.new_size >= item.file.size) item.note = "Already optimized";
-  item.newSize = out.new_size;
-  item.out = { url: out.download_url, name: `${stem(item.file.name)}-compressed.pdf` };
+  if (!blob) {                       // fallback: WorkDrive link only
+    item.newSize = out.new_size || item.file.size;
+    item.out = { url: out.download_url, name: `${stem(item.file.name)}-compressed.pdf` };
+    item.note = "Direct download failed, use the link";
+    return;
+  }
+  if (T && blob.size > T) item.note = "Closest possible size";
+  if (blob.size >= item.file.size) { blob = item.file; item.note = "Already optimized, original kept"; }
+  item.newSize = blob.size;
+  item.out = { blob, name: `${stem(item.file.name)}-compressed.pdf` };
 }
 
 /* ---------- ZIP (store only, no library) ---------- */
@@ -238,7 +277,7 @@ function saveBlob(blob, name) {
 }
 
 async function downloadResults() {
-  const list = files.filter(f => f.out?.blob).map(f => f.out);
+  const list = [...files.filter(f => f.out?.blob).map(f => f.out), ...outputs];
   if (!list.length) return;
   if (list.length === 1) return saveBlob(list[0].blob, list[0].name);
   const seen = {};
@@ -253,14 +292,17 @@ function render() {
     const saved = it.newSize !== undefined ? Math.round((1 - it.newSize / it.file.size) * 100) : 0;
     const link = it.out?.url ? ` · <a href="${esc(it.out.url)}" target="_blank" rel="noopener">Open file</a>` : "";
     const meta = it.status === "working" ? esc(it.stage || "Processing...")
+      : it.status === "done" && it.msg ? esc(it.msg)
+      : it.status === "done" && it.pages ? `${it.pages} page ${it.pages === 1 ? "image" : "images"} ready · ${fmtSize(it.newSize)}`
       : it.status === "done" && it.links ? `${it.links.length} page ${it.links.length === 1 ? "image" : "images"} saved to WorkDrive · ` + it.links.map((l, i) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">Page ${i + 1}</a>`).join(" · ")
       : it.status === "done" ? `${fmtSize(it.file.size)} → ${fmtSize(it.newSize)} (${saved >= 0 ? "-" + saved : "+" + Math.abs(saved)}%)${it.note ? " · " + esc(it.note) : ""}${link}`
       : it.status === "error" ? esc(it.error) : fmtSize(it.file.size);
     const state = it.status === "working" ? '<div class="file-spinner"></div>' : it.status === "done" ? OKI : "";
+    const mv = tool === "merge" && it.status === "pending" ? `<button type="button" class="file-remove" data-move="${it.id}:-1" aria-label="Move up">▲</button><button type="button" class="file-remove" data-move="${it.id}:1" aria-label="Move down">▼</button>` : "";
     const rm = it.status === "working" ? "" : `<button type="button" class="file-remove" data-remove="${it.id}" aria-label="Remove">${CLOSE}</button>`;
     return `<li class="file-item is-${it.status}"><div class="file-badge ${ext === "pdf" ? "pdf" : "image"}">${esc(ext)}</div>
       <div class="file-info"><p class="file-name" title="${esc(it.file.name)}">${esc(it.file.name)}</p><p class="file-meta">${meta}</p></div>
-      ${state}${rm}<div class="file-bar"></div></li>`;
+      ${state}${mv}${rm}<div class="file-bar"></div></li>`;
   }).join("");
   const total = files.reduce((n, f) => n + f.file.size, 0);
   $("file-summary").classList.toggle("hidden", !files.length);
@@ -268,7 +310,7 @@ function render() {
   $("clear-all").classList.toggle("hidden", busy);
   $("dropzone").classList.toggle("disabled", busy);
   $("run-btn").disabled = busy;
-  $("download-btn").hidden = !files.some(f => f.out?.blob);
+  $("download-btn").hidden = !(files.some(f => f.out?.blob) || outputs.length);
 }
 
 function setError(msg) {
@@ -282,7 +324,7 @@ function addFiles(list) {
   const problems = [];
   [...list].forEach(file => {
     const ext = getExt(file.name);
-    if (!ALLOWED_EXT.includes(ext)) problems.push(`${file.name}: .${ext || "unknown"} is not supported.`);
+    if (!(tool === "convert" ? ALLOWED_EXT : ["pdf"]).includes(ext)) problems.push(`${file.name}: .${ext || "unknown"} is not supported.`);
     else if (!file.size) problems.push(`${file.name}: the file is empty.`);
     else if (file.size > MAX_FILE_MB * 1048576) problems.push(`${file.name}: larger than ${MAX_FILE_MB} MB.`);
     else if (files.some(f => f.file.name === file.name && f.file.size === file.size)) problems.push(`${file.name}: already added.`);
@@ -293,15 +335,72 @@ function addFiles(list) {
   render();
 }
 
+/* ---------- Merge and Pages tools ---------- */
+async function runMerge() {
+  if (files.length < 2) return setError("Add at least two PDF files to merge.");
+  clearError(); busy = true; render();
+  try {
+    const ids = [];
+    for (const it of files) { it.status = "working"; it.stage = "Uploading..."; render(); ids.push(await uploadToStorage(it.file)); }
+    files.forEach(it => { it.stage = "Merging..."; }); render();
+    const out = await callFn(MERGE_FUNCTION, { file_ids: ids.join(","), name: $("m-name").value.trim() || "merged" });
+    const blob = await fetchCrmFile(out.file_id);
+    outputs = [{ blob, name: out.name || "merged.pdf" }];
+    files.forEach(it => { it.status = "done"; it.msg = `Merged into ${outputs[0].name} (${fmtSize(blob.size)})`; });
+    showToast("The PDFs are merged. Select Download results.");
+  } catch (err) {
+    console.error(err);
+    files.forEach(it => { if (it.status === "working") { it.status = "error"; it.error = err?.message || "Merge failed."; } });
+    showToast("The merge failed. Check the message on the files.", "error");
+  }
+  busy = false; render();
+}
+
+async function runPages() {
+  const range = $("pg-val").value.trim();
+  if (!range) return setError("Enter the pages, for example 1,3-5.");
+  const queue = files.filter(f => f.status !== "done");
+  if (!queue.length) return setError(files.length ? "All files are already processed." : "Add at least one PDF.");
+  clearError(); busy = true; render();
+  for (const it of queue) {
+    it.status = "working"; it.stage = "Uploading..."; render();
+    try {
+      const id = await uploadToStorage(it.file);
+      it.stage = pgAction === "delete" ? "Deleting pages..." : "Extracting pages..."; render();
+      const out = await callFn(PAGES_FUNCTION, { file_id: id, file_name: it.file.name, action: pgAction, pages: range });
+      const blob = await fetchCrmFile(out.file_id);
+      outputs.push({ blob, name: out.name || `${stem(it.file.name)}-edited.pdf` });
+      it.msg = `${pgAction === "delete" ? "Pages deleted" : "Pages extracted"} · ${fmtSize(blob.size)}`;
+      it.status = "done";
+    } catch (err) { console.error(err); it.status = "error"; it.error = err?.message || "Failed."; }
+    render();
+  }
+  busy = false; render();
+  const failed = files.filter(f => f.status === "error").length;
+  failed ? showToast(`${failed} ${failed === 1 ? "file" : "files"} failed.`, "error") : showToast("Done. Select Download results.");
+}
+
+function setTool(t) {
+  tool = t; files = []; outputs = []; clearError();
+  ["convert", "merge", "pages"].forEach(x => $("tab-" + x).classList.toggle("hidden", x !== t));
+  $("run-label").textContent = { convert: "Process files", merge: "Merge PDFs", pages: "Apply to PDFs" }[t];
+  $("dz-hint").textContent = t === "convert"
+    ? `${ALLOWED_EXT.map(x => x.toUpperCase()).join(", ")} · up to ${MAX_FILE_MB} MB each · max ${MAX_FILES} files`
+    : `PDF only · up to ${MAX_FILE_MB} MB each · max ${MAX_FILES} files`;
+  render();
+}
+
 /* ---------- Run ---------- */
 async function run(e) {
   e.preventDefault();
   if (busy) return;
+  if (tool === "merge") return runMerge();
+  if (tool === "pages") return runPages();
   const queue = files.filter(f => f.status !== "done");
   if (!queue.length) return setError(files.length ? "All files are already processed." : "Add at least one file.");
   clearError(); busy = true; render();
   for (const it of queue) {
-    it.status = "working"; it.stage = "Processing..."; it.note = ""; it.out = null; it.links = null; render();
+    it.status = "working"; it.stage = "Processing..."; it.note = ""; it.out = null; it.links = null; it.pages = 0; render();
     try { await (getExt(it.file.name) === "pdf" ? processPdf(it) : processImage(it)); it.status = "done"; }
     catch (err) { console.error(err); it.status = "error"; it.error = err?.message || "Processing failed."; }
     render();
@@ -320,7 +419,7 @@ function pick(segId, attr, cb) {
     cb(b.dataset[attr]);
   });
 }
-function resetResults() { files.forEach(f => { if (f.status !== "working") { f.status = "pending"; f.out = null; f.links = null; f.newSize = undefined; } }); render(); }
+function resetResults() { outputs = []; files.forEach(f => { if (f.status !== "working") { f.status = "pending"; f.msg = ""; f.pages = 0; f.out = null; f.links = null; f.newSize = undefined; } }); render(); }
 
 function updateMode() {
   ["preset", "target", "scale"].forEach(m => $("p-" + m).classList.toggle("hidden", m !== st.mode));
@@ -346,7 +445,17 @@ function setup() {
     const b = e.target.closest("[data-remove]"); if (!b || busy) return;
     files = files.filter(f => f.id !== Number(b.dataset.remove)); clearError(); render();
   });
-  $("clear-all").addEventListener("click", () => { if (!busy) { files = []; clearError(); render(); } });
+  $("clear-all").addEventListener("click", () => { if (!busy) { files = []; outputs = []; clearError(); render(); } });
+  $("file-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-move]"); if (!b || busy) return;
+    const [id, d] = b.dataset.move.split(":").map(Number);
+    const i = files.findIndex(f => f.id === id), j = i + d;
+    if (j < 0 || j >= files.length) return;
+    [files[i], files[j]] = [files[j], files[i]]; render();
+  });
+  pick("tool-seg", "t", setTool);
+  pick("pg-seg", "a", (v) => { pgAction = v; resetResults(); });
+  ["pg-val", "m-name"].forEach(id => $(id).addEventListener("change", resetResults));
 
   pick("fmt-seg", "v", (v) => { st.fmt = v; resetResults(); });
   pick("mode-seg", "v", (v) => { st.mode = v; updateMode(); resetResults(); });
