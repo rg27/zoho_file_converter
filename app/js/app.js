@@ -21,7 +21,7 @@ const PRESETS = { low: { q: .85, s: 1 }, recommended: { q: .7, s: .85 }, extreme
 const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
 let files = [], outputs = [], nextId = 1, busy = false, greeted = false;
-let tool = "convert", pgAction = "delete";
+let tool = "convert", pgAction = "extract";
 const st = { fmt: "keep", mode: "preset", level: "recommended" };
 const $ = (id) => document.getElementById(id);
 
@@ -200,7 +200,7 @@ async function pdfToImages(item) {
   item.stage = "Uploading PDF..."; render();
   const fileId = await uploadToStorage(item.file);
   item.stage = `Converting pages to ${st.fmt.toUpperCase()}...`; render();
-  const out = await callFn(IMAGE_FUNCTION, { file_id: fileId, file_name: item.file.name, format: st.fmt === "jpg" ? "jpeg" : "png", pages: $("pg-range").value.trim() || "1-" });
+  const out = await callFn(IMAGE_FUNCTION, { file_id: fileId, file_name: item.file.name, format: st.fmt === "jpg" ? "jpeg" : "png", pages: "1-" });
   const got = [];
   try {
     for (const f of out.files) {
